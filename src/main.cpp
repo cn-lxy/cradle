@@ -24,21 +24,24 @@
 
 /*------------------------------------------ GPIO ------------------------------------------*/
 // GPIO of weight sensor
-#define HX711_SCK_PIN 13   // SCK 输出口 ---输出脉冲
-#define HX711_DT_PIN  12   // DT 输入口  ---读取数据
+#define HX711_SCK_PIN  13   // SCK 输出口 ---输出脉冲
+#define HX711_DT_PIN   12   // DT 输入口  ---读取数据
 
 // GPIO of alert
-#define ALERT_PIN     4   
+#define ALERT_PIN      4   
 
 // GPIO OLED SDA SCL
-#define OLED_SCL_PIN  5
-#define OLED_SDA_PIN  18
+#define OLED_SCL_PIN   5
+#define OLED_SDA_PIN   18
 
 // GPIO Board LED
-#define LED_PIN       2
+#define LED_PIN        2
 
 // GPIO Raindrop
-#define RAINDROP_PIN  14 
+#define RAINDROP_PIN   14
+
+// humidifier 加湿器 GPIO
+#define HUMIDIFIER_PIN 27
 /*------------------------------------------------------------------------------------------*/
 
 /*------------------------------------- 云平台消息相关 ---------------------------------------*/
@@ -88,10 +91,19 @@ Ticker timer; 						// 定时器
 IRTherm therm;  					// 红外MLX90614操作对象
 /*----------------------------------------------------------------------------------------*/
 
+/*---------------------------------------- 任务声明 -------------------------------------*/
+void setupTask(void *ptParams);       // [task]总程序初始化
+void sensorGetTask(void *ptParams);	  // [task]获取传感器
+void sensorLogTask(void *ptParams);   // [task]传感器数据打印
+void displayTask(void *ptParams);	  // [task]OLED显示
+void mqttCheck(void *ptParams);		  // [task]mqtt连接检查
+void controllerTask(void *ptParams);  // [task]报警（重量和雨滴）
+void sendMsgTask(void *ptParams);     // [task]向aliyun发送消息
+/*--------------------------------------------------------------------------------------*/
+
 /*------------------------------------ 函数声明 -------------------------------------------*/
 void pinSetup();												    // [ESP32]  初始化GPIO
 void WifiSetup(void); 											    // [wifi] 	wifi连接
-void sendMsgTimerCallback(TimerHandle_t xTimer);				    // [mqtt] 	mqtt发布post消息
 void mqttCallback(char *topic, byte *payload, unsigned int length); // [mqtt] 	收到消息回调
 void clientReconnect(void); 									    // [mqtt] 	mqtt客户端重连函数
 void mqttCheck(void);  											    // [mqtt] 	MQTT网络检测
@@ -101,29 +113,16 @@ void readSHTC3(void);     										    // [温湿度]  获取温湿度数据
 unsigned long readHX711(void);  								    // [重力] 	 读取重力传感器数据
 void getWeight(void); 											    // [重力] 	 获取物体真实重量
 void readRainDrop(void);										    // [雨滴]	 读取雨滴传感器数据
-void humidifierController(void);									// [加湿器]   控制加湿器 
+void humidifierHandler(void);									    // [加湿器]  控制加湿器 
+void alertHandler(void);											// [报警]	 报警控制
 /*---------------------------------------------------------------------------------------*/
 
-/*---------------------------------------- 任务声明 -------------------------------------*/
-void setupTask(void *ptParams);     // [task]总程序初始化
-void sensorGetTask(void *ptParams);	// [task]获取传感器
-void sensorLogTask(void *ptParams); // [task]传感器数据打印
-void displayTask(void *ptParams);	// [task]OLED显示
-void mqttCheck(void *ptParams);		// [task]mqtt连接检查
-void controllerTask(void *ptParams);		// [task]报警（重量和雨滴）
-void sendMsgTask(void *ptParams);   // [task]向aliyun发送消息
-/*--------------------------------------------------------------------------------------*/
-
-/*--------------------------------------- timer -----------------------------------------*/
-// 定时器
-TimerHandle_t sendMsgTimerHandle;
-void sendMsgTimerCallback(void *ptParams);	 // [timer]向Aliyun发送消息
-/*---------------------------------------------------------------------------------------*/
-
+//! setup
 void setup() {
-	xTaskCreate(setupTask, "setup task", 1024 * 6, NULL, 1, NULL);
+	xTaskCreate(setupTask, "setup task", 1024 * 4, NULL, 1, NULL);
 }
 
+//! loop
 void loop() {}
 
 void setupTask(void *ptParams) {
@@ -244,15 +243,12 @@ void mqttCheck(void *ptParams) {
 	}
 }
 
-// 报警事件
+// 硬件控制【报警，加湿器...】
 void controllerTask(void *ptParams) {
 	while(true) {
 		if (xSemaphoreTake(xMutexData, timeout) == pdPASS) {
-			if (data.weightTrue < 3000 || data.rainDrop == 1) {
-				digitalWrite(ALERT_PIN, HIGH);
-			} else {
-				digitalWrite(ALERT_PIN, LOW);
-			}
+			alertHandler();
+			humidifierHandler();
 			xSemaphoreGive(xMutexData);
 		}
 	}
@@ -292,6 +288,7 @@ void sendMsgTask(void *ptParams) {
 		vTaskDelayUntil(&lastSleepTick, xFrequency);
 	}
 }
+
 // 初始化GPIO
 void pinSetup() {
 	pinMode(HX711_SCK_PIN, OUTPUT); // HX711重力传感器 GPIO初始化
@@ -299,6 +296,98 @@ void pinSetup() {
 	pinMode(ALERT_PIN, OUTPUT);     // 报警GPIO初始化
 	pinMode(LED_PIN, OUTPUT);       // 板载LED初始化
 	pinMode(RAINDROP_PIN, INPUT);	// 雨滴传感器GPIO初始化
+	pinMode(ALERT_PIN, OUTPUT);
+	pinMode(HUMIDIFIER_PIN, OUTPUT);
+}
+
+/**
+ * @brief wifi连接 
+ */
+void WifiSetup() {
+	delay(10);
+	Serial.println("连接WIFI");
+	WiFi.begin(WIFI_SSID, WIFI_PASSWD);
+	while (!WiFi.isConnected()) {
+	Serial.print(".");
+		// vTaskDelay(pdMS_TO_TICKS(500));  // 500ms 
+		delay(500);  // 500ms 
+	}
+	Serial.println("OK");
+	Serial.println("Wifi连接成功");
+}
+
+/**
+ * @brief 收到消息回调
+ * @param topic 订阅的topic
+ * @param payload 接受的消息负载
+ * @param length 消息长度
+ */
+void mqttCallback(char *topic, byte *payload, unsigned int length) {
+	if (strstr(topic, ALINK_TOPIC_PROP_SET)) {
+		Serial.println("收到下发的命令主题:");
+		Serial.println(topic);
+		Serial.println("下发的内容是:");
+		payload[length] = '\0'; //为payload添加一个结束附,防止Serial.println()读过了
+		Serial.println((char *)payload);
+
+		// 接下来是收到的json字符串的解析
+		DynamicJsonDocument doc(150);
+		DeserializationError error = deserializeJson(doc, payload);
+		if (error) {
+			Serial.println("parse json failed");
+            Serial.println(error.c_str());
+			return;
+		}
+		JsonObject setAlinkMsgObj = doc.as<JsonObject>();
+		serializeJsonPretty(setAlinkMsgObj, Serial);
+		Serial.println();
+
+		// 回调数据处理
+		// rate           = setAlinkMsgObj["params"]["fanRate"];
+		// direction      = setAlinkMsgObj["params"]["fanDirection"];
+        // setTemperature = setAlinkMsgObj["params"]["temperature"];
+		// mode           = setAlinkMsgObj["params"]["mode"];
+		// Serial.print("rate: ");
+		// Serial.println(rate);
+		// Serial.print("direction: ");
+		// Serial.println(direction);
+		// Serial.print("setTemperature: ");
+		// Serial.println(setTemperature);
+		// Serial.print("mode: ");
+		// Serial.println(mode);
+	}
+}
+
+/**
+ * @brief mqtt客户端重连函数, 如果客户端断线,可以通过此函数重连		
+ */
+void clientReconnect() {
+	while (!mqttClient.connected()) { //再重连客户端
+		Serial.println("reconnect MQTT...");
+		if (connectAliyunMQTT(mqttClient, PRODUCT_KEY, DEVICE_NAME, DEVICE_SECRET)) {
+			Serial.println("connected");
+		} else {
+			Serial.println("failed");
+			Serial.println(mqttClient.state());
+			Serial.println("try again in 5 sec");
+			delay(5000);
+		}
+	}
+}
+
+/**
+ * @brief  MQTT网络检测
+ */
+void mqttCheck() {
+	if (!WiFi.isConnected()) {          // 判断WiFi是否连接
+		WifiSetup();
+	} else { //如果WIFI连接了,
+		if (!mqttClient.connected()) {  // 再次判断mqtt是否连接成功
+			Serial.println("mqtt disconnected!Try reconnect now...");
+			Serial.println(mqttClient.state());
+			clientReconnect();
+		}
+	}
 }
 
 /**
@@ -313,7 +402,6 @@ void readMLX() {
 		data.bodyTemperature = atoi(s.c_str());
   	}
 }
-
 
 /**
  * @brief SHTC3的CRC校验
@@ -452,94 +540,20 @@ void readRainDrop(void) {
 	data.rainDrop = digitalRead(RAINDROP_PIN);
 }
 
-
-/**
- * @brief wifi连接 
- */
-void WifiSetup() {
-	delay(10);
-	Serial.println("连接WIFI");
-	WiFi.begin(WIFI_SSID, WIFI_PASSWD);
-	while (!WiFi.isConnected()) {
-	Serial.print(".");
-		// vTaskDelay(pdMS_TO_TICKS(500));  // 500ms 
-		delay(500);  // 500ms 
-	}
-	Serial.println("OK");
-	Serial.println("Wifi连接成功");
-}
-
-
-/**
- * @brief 收到消息回调
- * @param topic 订阅的topic
- * @param payload 接受的消息负载
- * @param length 消息长度
- */
-void mqttCallback(char *topic, byte *payload, unsigned int length) {
-	if (strstr(topic, ALINK_TOPIC_PROP_SET)) {
-		Serial.println("收到下发的命令主题:");
-		Serial.println(topic);
-		Serial.println("下发的内容是:");
-		payload[length] = '\0'; //为payload添加一个结束附,防止Serial.println()读过了
-		Serial.println((char *)payload);
-
-		// 接下来是收到的json字符串的解析
-		DynamicJsonDocument doc(150);
-		DeserializationError error = deserializeJson(doc, payload);
-		if (error) {
-			Serial.println("parse json failed");
-            Serial.println(error.c_str());
-			return;
-		}
-		JsonObject setAlinkMsgObj = doc.as<JsonObject>();
-		serializeJsonPretty(setAlinkMsgObj, Serial);
-		Serial.println();
-
-		// 回调数据处理
-		// rate           = setAlinkMsgObj["params"]["fanRate"];
-		// direction      = setAlinkMsgObj["params"]["fanDirection"];
-        // setTemperature = setAlinkMsgObj["params"]["temperature"];
-		// mode           = setAlinkMsgObj["params"]["mode"];
-		// Serial.print("rate: ");
-		// Serial.println(rate);
-		// Serial.print("direction: ");
-		// Serial.println(direction);
-		// Serial.print("setTemperature: ");
-		// Serial.println(setTemperature);
-		// Serial.print("mode: ");
-		// Serial.println(mode);
+// 加湿器handler
+void humidifierHandler(void) {
+	if (data.envHumidity < 40.0) {
+		digitalWrite(HUMIDIFIER_PIN, HIGH);
+	}  else {
+		digitalWrite(HUMIDIFIER_PIN, LOW);
 	}
 }
 
-/**
- * @brief mqtt客户端重连函数, 如果客户端断线,可以通过此函数重连		
- */
-void clientReconnect() {
-	while (!mqttClient.connected()) { //再重连客户端
-		Serial.println("reconnect MQTT...");
-		if (connectAliyunMQTT(mqttClient, PRODUCT_KEY, DEVICE_NAME, DEVICE_SECRET)) {
-			Serial.println("connected");
-		} else {
-			Serial.println("failed");
-			Serial.println(mqttClient.state());
-			Serial.println("try again in 5 sec");
-			delay(5000);
-		}
-	}
-}
-
-/**
- * @brief  MQTT网络检测
- */
-void mqttCheck() {
-	if (!WiFi.isConnected()) {          // 判断WiFi是否连接
-		WifiSetup();
-	} else { //如果WIFI连接了,
-		if (!mqttClient.connected()) {  // 再次判断mqtt是否连接成功
-			Serial.println("mqtt disconnected!Try reconnect now...");
-			Serial.println(mqttClient.state());
-			clientReconnect();
-		}
+// 报警handler
+void alertHandler(void) {
+	if (data.weightTrue < 3000 || data.rainDrop == 1) {
+		digitalWrite(ALERT_PIN, HIGH);
+	} else {
+		digitalWrite(ALERT_PIN, LOW);
 	}
 }
