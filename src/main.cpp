@@ -9,13 +9,12 @@
 #include <Wire.h>
 #endif
 
-#include "Ticker.h"
-
 #include "PubSubClient.h"
 #include "WiFi.h"
 #include <aliyun_mqtt.h>
 #include <ArduinoJson.h>
 
+#include "buzzer.h"
 
 /*------------------------------------- WiFi & MQTT ----------------------------------------*/
 #define WIFI_SSID "Tenda_6F22A0"                         //wifi名
@@ -28,7 +27,7 @@
 #define HX711_DT_PIN   12   // DT 输入口  ---读取数据
 
 // GPIO of alert
-#define ALERT_PIN      4   
+#define BUZZER_PIN      4   
 
 // GPIO OLED SDA SCL
 #define OLED_SCL_PIN   5
@@ -42,7 +41,14 @@
 
 // humidifier 加湿器 GPIO
 #define HUMIDIFIER_PIN 27
+
+// electric blanket GPIO
+#define ELECTRIC_BLANKET_PIN 26
 /*------------------------------------------------------------------------------------------*/
+
+#define WEIGHT_THRESHOLD_VALUE 			 100
+#define HUMIDIFIER_THRESHOLD_VALUE 		 80.0 
+#define ELECTRON_BLANKET_THRESHOLD_VALUE 20.0
 
 /*------------------------------------- 云平台消息相关 ---------------------------------------*/
 #define PRODUCT_KEY "a1HqBPF6ttD"                        //产品ID
@@ -77,17 +83,25 @@ typedef struct {
 } Data;
 Data data;
 
-// mutex 
+typedef struct {
+	volatile int mode;
+} BuzzerMode;
+BuzzerMode buzzerMode;
+
+// mutex: senor data
 SemaphoreHandle_t xMutexData = NULL;
+// mutex: buzzer
+SemaphoreHandle_t xMutexBuzzer = NULL;
+
 TickType_t timeout = 1000;
+
 /*----------------------------------------------------------------------------------------*/
 
 /*----------------------------------------- 全局对象 ---------------------------------------*/
 // oled显示类构造函数
 U8G2_SH1106_128X64_NONAME_F_SW_I2C u8g2(U8G2_R0,  /*SCL*/ OLED_SCL_PIN,  /*SDA*/ OLED_SDA_PIN, /*reset*/ U8X8_PIN_NONE);  
-WiFiClient espClient;               //创建网络连接客户端
-PubSubClient mqttClient(espClient); //通过网络客户端连接创建mqtt连接客户端
-Ticker timer; 						// 定时器
+WiFiClient espClient;               // 创建网络连接客户端
+PubSubClient mqttClient(espClient); // 通过网络客户端连接创建mqtt连接客户端
 IRTherm therm;  					// 红外MLX90614操作对象
 /*----------------------------------------------------------------------------------------*/
 
@@ -99,6 +113,7 @@ void displayTask(void *ptParams);	  // [task]OLED显示
 void mqttCheck(void *ptParams);		  // [task]mqtt连接检查
 void controllerTask(void *ptParams);  // [task]报警（重量和雨滴）
 void sendMsgTask(void *ptParams);     // [task]向aliyun发送消息
+void buzzerTask(void *ptParams);
 /*--------------------------------------------------------------------------------------*/
 
 /*------------------------------------ 函数声明 -------------------------------------------*/
@@ -114,7 +129,8 @@ unsigned long readHX711(void);  								    // [重力] 	 读取重力传感器�
 void getWeight(void); 											    // [重力] 	 获取物体真实重量
 void readRainDrop(void);										    // [雨滴]	 读取雨滴传感器数据
 void humidifierHandler(void);									    // [加湿器]  控制加湿器 
-void alertHandler(void);											// [报警]	 报警控制
+void buzzerHandler(void);											// [报警]	 报警控制
+void electricBlanketHandler(void);									// [电热毯]  根据温度控制电热毯加热
 /*---------------------------------------------------------------------------------------*/
 
 //! setup
@@ -127,12 +143,13 @@ void loop() {}
 
 void setupTask(void *ptParams) {
 	Serial.begin(115200);       //设置串口波特率
+	              
 	pinSetup();
 	u8g2.begin();
 	therm.begin();
 	therm.setUnit(TEMP_C); 
-	Wire.begin();               // 初始化为I2C主机 SHTC3
-
+	Wire.begin(); // 初始化为I2C主机 SHTC3
+		
 	weightInit = readHX711();   // 获取开机时的重力传感器数据
 
 	WifiSetup();
@@ -141,29 +158,40 @@ void setupTask(void *ptParams) {
 	}
 	mqttClient.subscribe(ALINK_TOPIC_PROP_SET); // ! 订阅Topic !!这是关键!!
 	mqttClient.setCallback(mqttCallback);  			// 绑定收到set主题时的回调(命令下发1回调)
-
+	
+	
 	// 任务初始化: 都在 `core1` 上创建任务     	
 	xMutexData = xSemaphoreCreateMutex();  // 创建Mutex
 	if (xMutexData == NULL) {
 		Serial.println("No Enough RAM, unable to create `Semaphore.`");
 	}
-	if (xTaskCreatePinnedToCore(sensorGetTask, "sensorGetTask", 1024 * 4, NULL, 1, NULL, 1) == pdPASS)
+	xMutexBuzzer = xSemaphoreCreateMutex();  // 创建 buzzer mutex
+	if (xMutexBuzzer == NULL) {
+		Serial.println("No Enough RAM, unable to create `Semaphore.`");
+	}
+
+	if (xTaskCreatePinnedToCore(sensorGetTask, "sensorGetTask", 1024 * 5, NULL, 1, NULL, 1) == pdPASS)
 		Serial.println("sensorGetTask 创建成功");
-	if (xTaskCreatePinnedToCore(sensorLogTask, "sensorLogTask", 1024 * 4, NULL, 1, NULL, 1) == pdPASS)
+	if (xTaskCreatePinnedToCore(sensorLogTask, "sensorLogTask", 1024 * 5, NULL, 1, NULL, 1) == pdPASS)
 		Serial.println("sensorLogTask 创建成功");
-	if (xTaskCreatePinnedToCore(displayTask, "displayTask", 1024 * 4, NULL, 1, NULL, 1) == pdPASS)
+	if (xTaskCreatePinnedToCore(displayTask, "displayTask", 1024 * 5, NULL, 1, NULL, 1) == pdPASS)
 		Serial.println("displayTask 创建成功");
-	if (xTaskCreatePinnedToCore(mqttCheck, "mqttCheck", 1024 * 4, NULL, 1, NULL, 1) == pdPASS)
+	if (xTaskCreatePinnedToCore(mqttCheck, "mqttCheck", 1024 * 5, NULL, 1, NULL, 1) == pdPASS)
 		Serial.println("mqttCheck 创建成功");
-	if (xTaskCreatePinnedToCore(controllerTask, "controllerTask", 1024 * 4, NULL, 1, NULL, 1) == pdPASS)
+	if (xTaskCreatePinnedToCore(controllerTask, "controllerTask", 1024 * 5, NULL, 1, NULL, 1) == pdPASS)
 		Serial.println("controllerTask 创建成功");
 
-	if (xTaskCreatePinnedToCore(sendMsgTask, "sendMsgTask", 1024 * 4, NULL, 1, NULL, 0) == pdPASS)
+	if (xTaskCreatePinnedToCore(sendMsgTask, "sendMsgTask", 1024 * 5, NULL, 1, NULL, 1) == pdPASS)
 		Serial.println("sendMsgTask 创建成功");
+	
+	if (xTaskCreatePinnedToCore(buzzerTask, "buzzer music", 1024 * 4, NULL, 1, NULL, 1) == pdPASS)
+		Serial.println("buzzerLoop 创建成功");
+	
 
 	// BUG[定时器中有`sprintf`操作就会导致重启，使用task替换该功能的实现] 创建定时器
 	// sendMsgTimerHandle = xTimerCreate("sendMsg timer", 2000, pdTRUE, (void *)1, sendMsgTimerCallback);
 	// xTimerStart(sendMsgTimerHandle, portMAX_DELAY);
+
 	vTaskDelete(NULL);
 }
 
@@ -243,12 +271,13 @@ void mqttCheck(void *ptParams) {
 	}
 }
 
-// 硬件控制【报警，加湿器...】
+// 硬件控制【报警，加湿器，尿湿音乐】
 void controllerTask(void *ptParams) {
 	while(true) {
 		if (xSemaphoreTake(xMutexData, timeout) == pdPASS) {
-			alertHandler();
-			humidifierHandler();
+			buzzerHandler();			// 蜂鸣器
+			humidifierHandler();		// 加湿器
+			electricBlanketHandler();	// 电热毯
 			xSemaphoreGive(xMutexData);
 		}
 	}
@@ -289,15 +318,63 @@ void sendMsgTask(void *ptParams) {
 	}
 }
 
+// FIX 【修复】多状态蜂鸣器控制
+void buzzerTask(void *ptParams) {
+	int channel= 0;      // 通道
+	int freq = 2;     // 频率
+	int resolution = 8;  // 分辨率
+	ledcSetup(channel, freq, resolution);
+	ledcAttachPin(BUZZER_PIN, channel);
+	
+	int length = sizeof(tune) / sizeof(tune[0]);   //计算长度
+    int xMode = 0;
+	
+    while(true) {
+		if (xSemaphoreTake(xMutexBuzzer, timeout) == pdPASS) {
+			xMode = buzzerMode.mode;
+			xSemaphoreGive(xMutexBuzzer);
+		}
+		switch (xMode) {
+			case 0:
+				Serial.println("buzzer: none");
+				ledcWrite(channel, 0);
+				break;
+			case 1:
+				Serial.println("buzzer: alert");
+				ledcWrite(channel, 255);
+				vTaskDelay(pdMS_TO_TICKS(1000));
+				break;
+			case 2:
+				Serial.println("buzzer: music");
+				for(int x = 0; x < length; x++) {
+					if (xSemaphoreTake(xMutexBuzzer, timeout) == pdPASS) {
+						xMode = buzzerMode.mode;
+						xSemaphoreGive(xMutexBuzzer);
+						if (xMode != 2) break;
+					}
+					ledcWriteTone(0, tune[x]);
+					vTaskDelay(500 * durt[x]);   //这里用来根据节拍调节延时，500这个指数可以自己调整，在该音乐中，我发现用500比较合适。
+				}
+				// ledcWriteTone(0, 0);
+				vTaskDelay(pdMS_TO_TICKS(500));
+				break;
+			default:
+				break;
+		}
+	}
+}
+
+
 // 初始化GPIO
 void pinSetup() {
 	pinMode(HX711_SCK_PIN, OUTPUT); // HX711重力传感器 GPIO初始化
 	pinMode(HX711_DT_PIN, INPUT);   
-	pinMode(ALERT_PIN, OUTPUT);     // 报警GPIO初始化
+	pinMode(BUZZER_PIN, OUTPUT);     // 报警GPIO初始化
 	pinMode(LED_PIN, OUTPUT);       // 板载LED初始化
 	pinMode(RAINDROP_PIN, INPUT);	// 雨滴传感器GPIO初始化
-	pinMode(ALERT_PIN, OUTPUT);
 	pinMode(HUMIDIFIER_PIN, OUTPUT);
+	pinMode(ELECTRIC_BLANKET_PIN, OUTPUT);
+	pinMode(26, OUTPUT);
 }
 
 /**
@@ -542,7 +619,7 @@ void readRainDrop(void) {
 
 // 加湿器handler
 void humidifierHandler(void) {
-	if (data.envHumidity < 40.0) {
+	if (data.envHumidity < HUMIDIFIER_THRESHOLD_VALUE) {
 		digitalWrite(HUMIDIFIER_PIN, HIGH);
 	}  else {
 		digitalWrite(HUMIDIFIER_PIN, LOW);
@@ -550,10 +627,30 @@ void humidifierHandler(void) {
 }
 
 // 报警handler
-void alertHandler(void) {
-	if (data.weightTrue < 3000 || data.rainDrop == 1) {
-		digitalWrite(ALERT_PIN, HIGH);
+void buzzerHandler(void) {
+	if (xSemaphoreTake(xMutexBuzzer, timeout) == pdPASS) {				
+		if (data.weightTrue < WEIGHT_THRESHOLD_VALUE) {
+			buzzerMode.mode = 1;
+			xSemaphoreGive(xMutexBuzzer);
+			return;
+		} else if (data.rainDrop) {
+			// buzzer music
+			buzzerMode.mode = 2;
+			xSemaphoreGive(xMutexBuzzer);
+			return;
+		} else {
+			buzzerMode.mode = 0;
+			xSemaphoreGive(xMutexBuzzer);
+			return;
+		}
+	}
+}
+
+// 电热毯加热handler
+void electricBlanketHandler(void) {
+	if (data.envTemperature < ELECTRON_BLANKET_THRESHOLD_VALUE) {
+		digitalWrite(ELECTRIC_BLANKET_PIN, HIGH);
 	} else {
-		digitalWrite(ALERT_PIN, LOW);
+		digitalWrite(ELECTRIC_BLANKET_PIN, LOW);
 	}
 }
