@@ -17,38 +17,40 @@
 #include "buzzer.h"
 
 /*------------------------------------- WiFi & MQTT ----------------------------------------*/
-#define WIFI_SSID "Tenda_6F22A0"                         //wifi名
-#define WIFI_PASSWD "12345678"                           //wifi密码
+#define WIFI_SSID "DESKTOP-LXY"                         //wifi名
+#define WIFI_PASSWD "12345678"                          //wifi密码
 /*------------------------------------------------------------------------------------------*/
 
 /*------------------------------------------ GPIO ------------------------------------------*/
-// GPIO of weight sensor
+// GPIO of weight sensor [重力传感器]
 #define HX711_SCK_PIN  13   // SCK 输出口 ---输出脉冲
 #define HX711_DT_PIN   12   // DT 输入口  ---读取数据
 
-// GPIO of alert
+// GPIO of alert [蜂鸣器]
 #define BUZZER_PIN      4   
 
-// GPIO OLED SDA SCL
+// GPIO OLED SDA SCL [显示屏]
 #define OLED_SCL_PIN   5
 #define OLED_SDA_PIN   18
 
-// GPIO Board LED
+// GPIO Board LED [板载LED !不用画!]
 #define LED_PIN        2
 
-// GPIO Raindrop
+// GPIO Raindrop [雨滴传感器]
 #define RAINDROP_PIN   14
 
-// humidifier 加湿器 GPIO
+// GPIO humidifier [加湿器] 
 #define HUMIDIFIER_PIN 27
 
-// electric blanket GPIO
+// GPIO electric blanket [电热毯]
 #define ELECTRIC_BLANKET_PIN 26
+// [奶瓶加热]
+#define WARM_MILK 25
 /*------------------------------------------------------------------------------------------*/
 
-#define WEIGHT_THRESHOLD_VALUE 			 100
-#define HUMIDIFIER_THRESHOLD_VALUE 		 80.0 
-#define ELECTRON_BLANKET_THRESHOLD_VALUE 20.0
+#define WEIGHT_THRESHOLD_VALUE 			 100   // 重量低于该值开启奶瓶加热
+#define HUMIDIFIER_THRESHOLD_VALUE 		 80.0  // 环境湿度低于该值开启加湿器
+#define ELECTRON_BLANKET_THRESHOLD_VALUE 20.0  // 环境温度低于该值开启电热毯
 
 /*------------------------------------- 云平台消息相关 ---------------------------------------*/
 #define PRODUCT_KEY "a1HqBPF6ttD"                        //产品ID
@@ -87,6 +89,11 @@ typedef struct {
 	volatile int mode;
 } BuzzerMode;
 BuzzerMode buzzerMode;
+
+typedef struct {
+	volatile bool warmMilk = false;
+} AliData;
+AliData aliData; 
 
 // mutex: senor data
 SemaphoreHandle_t xMutexData = NULL;
@@ -141,9 +148,9 @@ void setup() {
 //! loop
 void loop() {}
 
+// 👋
 void setupTask(void *ptParams) {
 	Serial.begin(115200);       //设置串口波特率
-	              
 	pinSetup();
 	u8g2.begin();
 	therm.begin();
@@ -205,6 +212,8 @@ void sensorGetTask(void *ptParams) {
 			getWeight();
 			readRainDrop();
 			readMLX();
+			// LOG
+			Serial.println("get sensor data.");
 			// 释放锁
 			xSemaphoreGive(xMutexData);
 		}
@@ -242,9 +251,9 @@ void displayTask(void *ptParams) {
 		char info5[32];
 		if (xSemaphoreTake(xMutexData, timeout) == pdPASS) {
 			sprintf(info1, "Weight: %ldg", data.weightTrue);
-			sprintf(info2, "EnvTemp: %.2f°", data.envTemperature);
+			sprintf(info2, "EnvTemp: %.2f", data.envTemperature);
 			sprintf(info3, "EnvHum: %.2f%%", data.envHumidity);
-			sprintf(info4, "BodyTemp: %.2f°", data.bodyTemperature);
+			sprintf(info4, "BodyTemp: %.2f", data.bodyTemperature);
 			sprintf(info5, "RainDrop: %d", data.rainDrop);
 			
 			xSemaphoreGive(xMutexData);  
@@ -318,7 +327,7 @@ void sendMsgTask(void *ptParams) {
 	}
 }
 
-// FIX 【修复】多状态蜂鸣器控制
+// FIXED 【修复】多状态蜂鸣器控制
 void buzzerTask(void *ptParams) {
 	int channel= 0;      // 通道
 	int freq = 2;     // 频率
@@ -420,18 +429,8 @@ void mqttCallback(char *topic, byte *payload, unsigned int length) {
 		Serial.println();
 
 		// 回调数据处理
-		// rate           = setAlinkMsgObj["params"]["fanRate"];
-		// direction      = setAlinkMsgObj["params"]["fanDirection"];
-        // setTemperature = setAlinkMsgObj["params"]["temperature"];
-		// mode           = setAlinkMsgObj["params"]["mode"];
-		// Serial.print("rate: ");
-		// Serial.println(rate);
-		// Serial.print("direction: ");
-		// Serial.println(direction);
-		// Serial.print("setTemperature: ");
-		// Serial.println(setTemperature);
-		// Serial.print("mode: ");
-		// Serial.println(mode);
+		aliData.warmMilk = setAlinkMsgObj["params"]["warmMilk"];  // {"name": "warmMilk", "type": "bool"}
+		Serial.println(aliData.warmMilk);
 	}
 }
 
@@ -477,7 +476,7 @@ void readMLX() {
 	if (therm.read()) { // On success, read() will return 1, on fail 0.
 		String s = String(therm.object(), 2);
 		data.bodyTemperature = atoi(s.c_str());
-  	}
+	}
 }
 
 /**
@@ -608,6 +607,7 @@ void getWeight() {
 	data.weightTrue  = HX711_Buffer; // 将传感器的输出值储存
 	data.weightTrue -= weightInit;   // 获取实物的AD采样数值。
 	data.weightTrue  = (long)((float)data.weightTrue / GAP_VALUE);    //AD值转换为重量（g） 
+	//Serial.printf("data weight: %d", data.weightTrue);
 }
 
 /**
