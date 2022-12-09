@@ -48,12 +48,12 @@
 #define WARM_MILK 25
 /*------------------------------------------------------------------------------------------*/
 
-#define WEIGHT_THRESHOLD_VALUE 			 100   // 重量低于该值开启奶瓶加热
+#define WEIGHT_THRESHOLD_VALUE 			 100   // 重量低于该值开启报警
 #define HUMIDIFIER_THRESHOLD_VALUE 		 80.0  // 环境湿度低于该值开启加湿器
-#define ELECTRON_BLANKET_THRESHOLD_VALUE 20.0  // 环境温度低于该值开启电热毯
+#define ELECTRON_BLANKET_THRESHOLD_VALUE 25.0  // 环境温度低于该值开启电热毯
 
 /*------------------------------------- 云平台消息相关 ---------------------------------------*/
-#define PRODUCT_KEY "a1HqBPF6ttD"                        //产品ID
+#define PRODUCT_KEY "a1HqBPF6ttD"                         //产品ID
 #define DEVICE_NAME "ESP32"                               //设备名
 #define DEVICE_SECRET "37242dd6595dd7e1e5e174d3ae9189e0"  //设备key
 #define REGION_ID "cn-shanghai"
@@ -77,7 +77,7 @@ volatile long weightInit = 0;   // 传感器初始值
 unsigned int postMsgId = 0;     // 消息发布计数[Aliyun]
 // 数据结构体
 typedef struct {
-	volatile long    weightTrue;  	  // 真实重量 = 传感器返回重量 - 传感器初始值  
+	volatile long   weightTrue;  	  // 真实重量 = 传感器返回重量 - 传感器初始值  
 	volatile double bodyTemperature;  // 体温
 	volatile double envTemperature;   // 环境温度
 	volatile double envHumidity;      // 环境湿度
@@ -124,7 +124,7 @@ void buzzerTask(void *ptParams);
 /*--------------------------------------------------------------------------------------*/
 
 /*------------------------------------ 函数声明 -------------------------------------------*/
-void pinSetup();												    // [ESP32]  初始化GPIO
+void pinSetup(void);												// [ESP32]  初始化GPIO
 void WifiSetup(void); 											    // [wifi] 	wifi连接
 void mqttCallback(char *topic, byte *payload, unsigned int length); // [mqtt] 	收到消息回调
 void clientReconnect(void); 									    // [mqtt] 	mqtt客户端重连函数
@@ -138,6 +138,7 @@ void readRainDrop(void);										    // [雨滴]	 读取雨滴传感器数据
 void humidifierHandler(void);									    // [加湿器]  控制加湿器 
 void buzzerHandler(void);											// [报警]	 报警控制
 void electricBlanketHandler(void);									// [电热毯]  根据温度控制电热毯加热
+void initDisplayFun(const char* info);								// [显示]	 在初始化阶段显示初始化信息
 /*---------------------------------------------------------------------------------------*/
 
 //! setup
@@ -150,15 +151,20 @@ void loop() {}
 
 // 👋
 void setupTask(void *ptParams) {
+	initDisplayFun("systems initialize...");
 	Serial.begin(115200);       //设置串口波特率
 	pinSetup();
 	u8g2.begin();
 	therm.begin();
 	therm.setUnit(TEMP_C); 
 	Wire.begin(); // 初始化为I2C主机 SHTC3
-		
+	
 	weightInit = readHX711();   // 获取开机时的重力传感器数据
+	// TODO: 打印初始化的 重量值：weightInit
+	Serial.printf("weightInit Date: %ll\n", weightInit);
+	Serial.flush();
 
+	initDisplayFun("Network initialize...");
 	WifiSetup();
 	if (connectAliyunMQTT(mqttClient, PRODUCT_KEY, DEVICE_NAME, DEVICE_SECRET)) {
 		Serial.println("MQTT服务器连接成功!");
@@ -166,7 +172,7 @@ void setupTask(void *ptParams) {
 	mqttClient.subscribe(ALINK_TOPIC_PROP_SET); // ! 订阅Topic !!这是关键!!
 	mqttClient.setCallback(mqttCallback);  			// 绑定收到set主题时的回调(命令下发1回调)
 	
-	
+	initDisplayFun("system initialize...");
 	// 任务初始化: 都在 `core1` 上创建任务     	
 	xMutexData = xSemaphoreCreateMutex();  // 创建Mutex
 	if (xMutexData == NULL) {
@@ -199,6 +205,8 @@ void setupTask(void *ptParams) {
 	// sendMsgTimerHandle = xTimerCreate("sendMsg timer", 2000, pdTRUE, (void *)1, sendMsgTimerCallback);
 	// xTimerStart(sendMsgTimerHandle, portMAX_DELAY);
 
+	initDisplayFun("initialize over!");
+	vTaskDelay(pdMS_TO_TICKS(1000));
 	vTaskDelete(NULL);
 }
 
@@ -653,4 +661,16 @@ void electricBlanketHandler(void) {
 	} else {
 		digitalWrite(ELECTRIC_BLANKET_PIN, LOW);
 	}
+}
+
+
+// 初始化显示信息
+void initDisplayFun(const char* info) {
+	u8g2.clearBuffer();                                       
+	u8g2.setFont(u8g2_font_ncenB08_tr);      
+	u8g2.setColorIndex(2); 
+	char buffer[32];
+	sprintf(buffer, "%s", info);
+	u8g2.drawStr(0, 10, buffer);       
+	u8g2.sendBuffer(); 
 }

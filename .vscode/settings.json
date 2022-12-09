@@ -6,6 +6,16 @@
         "*.html": "html",
         "string_view": "cpp",
         "istream": "cpp",
-        "ostream": "cpp"
+        "ostream": "cpp",
+        "*.tcc": "cpp",
+        "cstring": "cpp",
+        "string": "cpp",
+        "exception": "cpp",
+        "fstream": "cpp",
+        "iomanip": "cpp",
+        "sstream": "cpp",
+        "stdexcept": "cpp",
+        "system_error": "cpp",
+        "typeinfo": "cpp"
     }
 }
