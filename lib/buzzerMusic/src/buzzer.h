@@ -34,7 +34,7 @@
 #define SIXTEENTH 0.625
 
 //列出所有节拍
-int tune[] = { //根据简谱列出各频率
+int tune[] = {              //根据简谱列出各频率
     NTD3,NTD3,NTD4,NTD5,
     NTD5,NTD4,NTD3,NTD2,
     NTD1,NTD1,NTD2,NTD3,
@@ -53,7 +53,7 @@ int tune[] = { //根据简谱列出各频率
     NTD2,NTD1,NTD1
 };
 
-float durt[]=                   //根据简谱列出各节拍
+float durt[]=              //根据简谱列出各节拍
 {
     1,1,1,1,
     1,1,1,1,
@@ -77,7 +77,7 @@ bool buzzerStopFlag = false;
 
 // BUG 可以接收创建任务时传递的参数，但是不能使用
 void buzzerLoop(void *ptParam) {
-    uint8_t pin = *((uint8_t *)ptParam);
+    // uint8_t _pin = *((uint8_t *)ptParam);
     // Serial.printf("buzzer pin: %d", pin);
     int length = sizeof(tune) / sizeof(tune[0]);   //计算长度
     ledcAttachPin(4, 1);
@@ -96,7 +96,3 @@ void buzzerLoop(void *ptParam) {
     }
 }
 
-// 音调
-// note_t tone[] = {NOTE_A}
-// // 音阶
-// uint8_t scale[] = {}
