@@ -40,8 +40,9 @@
 
 // GPIO electric blanket [电热毯]
 #define ELECTRIC_BLANKET_PIN 26
-// [奶瓶加热]
-#define WARM_MILK 25
+// GPIO Bottle Heat [奶瓶加热]
+#define BOTTLE_HEAT_PIN 25
+
 /*------------------------------------------------------------------------------------------*/
 
 #define WEIGHT_THRESHOLD_VALUE 			 100   // 重量低于该值开启报警
@@ -81,13 +82,15 @@ typedef struct {
 } Data;
 Data data;
 
+// 蜂鸣器模式
 typedef struct {
 	volatile int mode;
 } BuzzerMode;
 BuzzerMode buzzerMode;
 
+// 奶瓶加热
 typedef struct {
-	volatile bool warmMilk = false;
+	volatile bool bottleHeat = false;
 } AliData;
 AliData aliData; 
 
@@ -114,9 +117,9 @@ void sensorGetTask(void *ptParams);	  // [task]获取传感器
 void sensorLogTask(void *ptParams);   // [task]传感器数据打印
 void displayTask(void *ptParams);	  // [task]OLED显示
 void mqttCheck(void *ptParams);		  // [task]mqtt连接检查
-void controllerTask(void *ptParams);  // [task]报警（重量和雨滴）
+void controllerTask(void *ptParams);  // [task]外设控制
 void sendMsgTask(void *ptParams);     // [task]向aliyun发送消息
-void buzzerTask(void *ptParams);
+void buzzerTask(void *ptParams);      // [task]蜂鸣器控制
 /*--------------------------------------------------------------------------------------*/
 
 /*------------------------------------ 函数声明 -------------------------------------------*/
@@ -132,7 +135,8 @@ unsigned long readHX711(void);  								    // [重力] 	 读取重力传感器�
 void getWeight(void); 											    // [重力] 	 获取物体真实重量
 void readRainDrop(void);										    // [雨滴]	 读取雨滴传感器数据
 void humidifierHandler(void);									    // [加湿器]  控制加湿器 
-void buzzerHandler(void);											// [报警]	 报警控制
+void buzzerHandler(void);											// [报警]	 蜂鸣器模式控制
 void electricBlanketHandler(void);									// [电热毯]  根据温度控制电热毯加热
+void bottleHeatingHandler(void);									// [奶瓶]    由微信小程序控制开启或给关闭奶瓶加热
 void initDisplayFun(const char* info);								// [显示]	 在初始化阶段显示初始化信息
 /*---------------------------------------------------------------------------------------*/

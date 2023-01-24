@@ -15,7 +15,8 @@
 #include "main.h"
 
 //! setup
-void setup() {
+void setup()
+{
 	xTaskCreate(setupTask, "setup task", 1024 * 4, NULL, 1, NULL);
 }
 
@@ -23,36 +24,40 @@ void setup() {
 void loop() {}
 
 // 👋
-void setupTask(void *ptParams) {
+void setupTask(void *ptParams)
+{
 	initDisplayFun("systems initialize...");
-	Serial.begin(115200);       //设置串口波特率
+	Serial.begin(115200); // 设置串口波特率
 	pinSetup();
 	u8g2.begin();
 	therm.begin();
-	therm.setUnit(TEMP_C); 
+	therm.setUnit(TEMP_C);
 	Wire.begin(); // 初始化为I2C主机 SHTC3
-	
-	weightInit = readHX711();   // 获取开机时的重力传感器数据
+
+	weightInit = readHX711(); // 获取开机时的重力传感器数据
 	// TODO: 打印初始化的 重量值：weightInit
 	Serial.printf("weightInit Date: %ld\n", weightInit);
 	Serial.flush();
 
 	initDisplayFun("Network initialize...");
 	WifiSetup();
-	if (connectAliyunMQTT(mqttClient, PRODUCT_KEY, DEVICE_NAME, DEVICE_SECRET)) {
+	if (connectAliyunMQTT(mqttClient, PRODUCT_KEY, DEVICE_NAME, DEVICE_SECRET))
+	{
 		Serial.println("MQTT服务器连接成功!");
 	}
 	mqttClient.subscribe(ALINK_TOPIC_PROP_SET); // ! 订阅Topic !!这是关键!!
-	mqttClient.setCallback(mqttCallback);  			// 绑定收到set主题时的回调(命令下发1回调)
-	
+	mqttClient.setCallback(mqttCallback);		// 绑定收到set主题时的回调(命令下发1回调)
+
 	initDisplayFun("system initialize...");
-	// 任务初始化: 都在 `core1` 上创建任务     	
-	xMutexData = xSemaphoreCreateMutex();  // 创建Mutex
-	if (xMutexData == NULL) {
+	// 任务初始化: 都在 `core1` 上创建任务
+	xMutexData = xSemaphoreCreateMutex(); // 创建Mutex
+	if (xMutexData == NULL)
+	{
 		Serial.println("No Enough RAM, unable to create `Semaphore.`");
 	}
-	xMutexBuzzer = xSemaphoreCreateMutex();  // 创建 buzzer mutex
-	if (xMutexBuzzer == NULL) {
+	xMutexBuzzer = xSemaphoreCreateMutex(); // 创建 buzzer mutex
+	if (xMutexBuzzer == NULL)
+	{
 		Serial.println("No Enough RAM, unable to create `Semaphore.`");
 	}
 
@@ -69,10 +74,9 @@ void setupTask(void *ptParams) {
 
 	if (xTaskCreatePinnedToCore(sendMsgTask, "sendMsgTask", 1024 * 5, NULL, 1, NULL, 1) == pdPASS)
 		Serial.println("sendMsgTask 创建成功");
-	
+
 	if (xTaskCreatePinnedToCore(buzzerTask, "buzzer music", 1024 * 4, NULL, 1, NULL, 1) == pdPASS)
 		Serial.println("buzzerLoop 创建成功");
-	
 
 	// BUG[定时器中有`sprintf`操作就会导致重启，使用task替换该功能的实现] 创建定时器
 	// sendMsgTimerHandle = xTimerCreate("sendMsg timer", 2000, pdTRUE, (void *)1, sendMsgTimerCallback);
@@ -83,12 +87,15 @@ void setupTask(void *ptParams) {
 	vTaskDelete(NULL);
 }
 
-void sensorGetTask(void *ptParams) {
-	const TickType_t xFrequency = 100;  // 采集频率 100 ticks = 100ms
+void sensorGetTask(void *ptParams)
+{
+	const TickType_t xFrequency = 100; // 采集频率 100 ticks = 100ms
 	TickType_t lastSleepTick = xTaskGetTickCount();
-	while(true) {
+	while (true)
+	{
 		// 拿取钥匙
-		if (xSemaphoreTake(xMutexData, timeout) == pdPASS) {
+		if (xSemaphoreTake(xMutexData, timeout) == pdPASS)
+		{
 			readSHTC3();
 			getWeight();
 			readRainDrop();
@@ -103,11 +110,14 @@ void sensorGetTask(void *ptParams) {
 }
 
 // 传感器数据打印task
-void sensorLogTask(void *ptParams) {
+void sensorLogTask(void *ptParams)
+{
 	const TickType_t xFrequency = 1000;
 	TickType_t lastSleepTick = xTaskGetTickCount();
-	while(true) {
-		if (xSemaphoreTake(xMutexData, timeout) == pdPASS) {
+	while (true)
+	{
+		if (xSemaphoreTake(xMutexData, timeout) == pdPASS)
+		{
 			Serial.printf("BodyTemperature: %.2f°\n", data.bodyTemperature);
 			Serial.printf("Humidity: %.2f%%, Temperature: %.2f\n", data.envTemperature, data.envHumidity);
 			Serial.printf("Weight: %ldg\n", data.weightTrue);
@@ -120,86 +130,104 @@ void sensorLogTask(void *ptParams) {
 }
 
 // OLED显示task
-void displayTask(void *ptParams) {
-	while(true) {
-		u8g2.clearBuffer();                                       
-		u8g2.setFont(u8g2_font_ncenB08_tr);      
-		u8g2.setColorIndex(2); 
+void displayTask(void *ptParams)
+{
+	while (true)
+	{
+		u8g2.clearBuffer();
+		u8g2.setFont(u8g2_font_ncenB08_tr);
+		u8g2.setColorIndex(2);
 		char info1[32];
 		char info2[32];
 		char info3[32];
 		char info4[32];
 		char info5[32];
-		if (xSemaphoreTake(xMutexData, timeout) == pdPASS) {
+		if (xSemaphoreTake(xMutexData, timeout) == pdPASS)
+		{
 			sprintf(info1, "Weight: %ldg", data.weightTrue);
 			sprintf(info2, "EnvTemp: %.2f", data.envTemperature);
 			sprintf(info3, "EnvHum: %.2f%%", data.envHumidity);
 			sprintf(info4, "BodyTemp: %.2f", data.bodyTemperature);
 			sprintf(info5, "RainDrop: %d", data.rainDrop);
-			
-			xSemaphoreGive(xMutexData);  
-		} else {
+
+			xSemaphoreGive(xMutexData);
+		}
+		else
+		{
 			continue;
 		}
-		u8g2.drawStr(0, 10, info1);       
-		u8g2.drawStr(0, 20, info2);       
-		u8g2.drawStr(0, 30, info3);       
-		u8g2.drawStr(0, 40, info4);       
+		u8g2.drawStr(0, 10, info1);
+		u8g2.drawStr(0, 20, info2);
+		u8g2.drawStr(0, 30, info3);
+		u8g2.drawStr(0, 40, info4);
 		u8g2.drawStr(0, 50, info5);
-		u8g2.sendBuffer(); 
+		u8g2.sendBuffer();
 	}
 }
 
 // mqtt连接检查task，1s检查一次
-void mqttCheck(void *ptParams) {
+void mqttCheck(void *ptParams)
+{
 	const TickType_t xFrequency = 1000; // 1000 ticks = 1000ms
 	TickType_t xLastSleepTick = xTaskGetTickCount();
-	while(true) {
-		mqttCheck();        // 检查mqtt连接
-		mqttClient.loop();  // mqtt客户端监听，不会阻塞
+	while (true)
+	{
+		mqttCheck();	   // 检查mqtt连接
+		mqttClient.loop(); // mqtt客户端监听，不会阻塞
 		vTaskDelayUntil(&xLastSleepTick, xFrequency);
 	}
 }
 
-// 硬件控制【报警，加湿器，尿湿音乐】
-void controllerTask(void *ptParams) {
-	while(true) {
-		if (xSemaphoreTake(xMutexData, timeout) == pdPASS) {
-			buzzerHandler();			// 蜂鸣器
-			humidifierHandler();		// 加湿器
-			electricBlanketHandler();	// 电热毯
+// 硬件控制 [报警,加湿器,尿湿音乐,电热毯,奶瓶加热]
+void controllerTask(void *ptParams)
+{
+	while (true)
+	{
+		if (xSemaphoreTake(xMutexData, timeout) == pdPASS)
+		{
+			buzzerHandler();		  // 蜂鸣器
+			humidifierHandler();	  // 加湿器
+			electricBlanketHandler(); // 电热毯
+			bottleHeatingHandler();	  // 奶瓶加热
 			xSemaphoreGive(xMutexData);
 		}
 	}
 }
 
-void sendMsgTask(void *ptParams) {
-	const TickType_t xFrequency = 5000; 
+void sendMsgTask(void *ptParams)
+{
+	const TickType_t xFrequency = 5000;
 	TickType_t lastSleepTick = xTaskGetTickCount();
-	while(true) {
-		if (mqttClient.connected()) {
-			//先拼接出json字符串
+	while (true)
+	{
+		if (mqttClient.connected())
+		{
+			// 先拼接出json字符串
 			char param[128] = {0};
 			char jsonBuf[256] = {0};
-			if (xSemaphoreTake(xMutexData, timeout) == pdPASS) {
-			// 把要上传的数据写在param中
-				sprintf(param, 
-					"{\"BodyTemperature\":%.2f,\"EnvTemperature\":%.2f,\"EnvHumidity\":%.2f,\"RainDrop\":%d}", 
-					data.bodyTemperature, data.envTemperature, data.envHumidity, data.rainDrop); 
+			if (xSemaphoreTake(xMutexData, timeout) == pdPASS)
+			{
+				// 把要上传的数据写在param中
+				sprintf(param,
+						"{\"BodyTemperature\":%.2f,\"EnvTemperature\":%.2f,\"EnvHumidity\":%.2f,\"RainDrop\":%d}",
+						data.bodyTemperature, data.envTemperature, data.envHumidity, data.rainDrop);
 
 				postMsgId += 1;
 				sprintf(jsonBuf, ALINK_BODY_FORMAT, postMsgId, ALINK_METHOD_PROP_POST, param);
 				xSemaphoreGive(xMutexData);
 
-				//再从mqtt客户端中发布post消息
-				if (mqttClient.publish(ALINK_TOPIC_PROP_POST, jsonBuf)) {
+				// 再从mqtt客户端中发布post消息
+				if (mqttClient.publish(ALINK_TOPIC_PROP_POST, jsonBuf))
+				{
 					Serial.print("Post message to cloud: ");
 					Serial.println(jsonBuf);
 					// 发送成功板载LED闪烁
 					digitalWrite(LED_PIN, HIGH);
-					vTaskDelay(pdMS_TO_TICKS(50));  // 50ms
+					vTaskDelay(pdMS_TO_TICKS(50)); // 50ms
 					digitalWrite(LED_PIN, LOW);
-				} else {
+				}
+				else
+				{
 					Serial.println("Publish message to cloud failed!");
 				}
 			}
@@ -209,75 +237,84 @@ void sendMsgTask(void *ptParams) {
 }
 
 // FIXED 【修复】多状态蜂鸣器控制
-void buzzerTask(void *ptParams) {
-	int channel= 0;      // 通道
-	int freq = 2;     // 频率
-	int resolution = 8;  // 分辨率
+void buzzerTask(void *ptParams)
+{
+	int channel = 0;	// 通道
+	int freq = 2;		// 频率
+	int resolution = 8; // 分辨率
 	ledcSetup(channel, freq, resolution);
 	ledcAttachPin(BUZZER_PIN, channel);
-	
-	int length = sizeof(tune) / sizeof(tune[0]);   //计算长度
-    int xMode = 0;
-	
-    while(true) {
-		if (xSemaphoreTake(xMutexBuzzer, timeout) == pdPASS) {
+
+	int length = sizeof(tune) / sizeof(tune[0]); // 计算长度
+	int xMode = 0;
+
+	while (true)
+	{
+		if (xSemaphoreTake(xMutexBuzzer, timeout) == pdPASS)
+		{
 			xMode = buzzerMode.mode;
 			xSemaphoreGive(xMutexBuzzer);
 		}
-		switch (xMode) {
-			case 0:
-				Serial.println("buzzer: none");
-				ledcWrite(channel, 0);
-				break;
-			case 1:
-				Serial.println("buzzer: alert");
-				ledcWrite(channel, 255);
-				vTaskDelay(pdMS_TO_TICKS(1000));
-				break;
-			case 2:
-				Serial.println("buzzer: music");
-				for(int x = 0; x < length; x++) {
-					if (xSemaphoreTake(xMutexBuzzer, timeout) == pdPASS) {
-						xMode = buzzerMode.mode;
-						xSemaphoreGive(xMutexBuzzer);
-						if (xMode != 2) break;
-					}
-					ledcWriteTone(0, tune[x]);
-					vTaskDelay(500 * durt[x]);   //这里用来根据节拍调节延时，500这个指数可以自己调整，在该音乐中，我发现用500比较合适。
+		switch (xMode)
+		{
+		case 0:
+			Serial.println("buzzer: none");
+			ledcWrite(channel, 0);
+			break;
+		case 1:
+			Serial.println("buzzer: alert");
+			ledcWrite(channel, 255);
+			vTaskDelay(pdMS_TO_TICKS(1000));
+			break;
+		case 2:
+			Serial.println("buzzer: music");
+			for (int x = 0; x < length; x++)
+			{
+				if (xSemaphoreTake(xMutexBuzzer, timeout) == pdPASS)
+				{
+					xMode = buzzerMode.mode;
+					xSemaphoreGive(xMutexBuzzer);
+					if (xMode != 2)
+						break;
 				}
-				// ledcWriteTone(0, 0);
-				vTaskDelay(pdMS_TO_TICKS(500));
-				break;
-			default:
-				break;
+				ledcWriteTone(0, tune[x]);
+				vTaskDelay(500 * durt[x]); // 这里用来根据节拍调节延时，500这个指数可以自己调整，在该音乐中，我发现用500比较合适。
+			}
+			// ledcWriteTone(0, 0);
+			vTaskDelay(pdMS_TO_TICKS(500));
+			break;
+		default:
+			break;
 		}
 	}
 }
 
-
 // 初始化GPIO
-void pinSetup() {
+void pinSetup()
+{
 	pinMode(HX711_SCK_PIN, OUTPUT); // HX711重力传感器 GPIO初始化
-	pinMode(HX711_DT_PIN, INPUT);   
-	pinMode(BUZZER_PIN, OUTPUT);     // 报警GPIO初始化
-	pinMode(LED_PIN, OUTPUT);       // 板载LED初始化
-	pinMode(RAINDROP_PIN, INPUT);	// 雨滴传感器GPIO初始化
+	pinMode(HX711_DT_PIN, INPUT);
+	pinMode(BUZZER_PIN, OUTPUT);  // 报警GPIO初始化
+	pinMode(LED_PIN, OUTPUT);	  // 板载LED初始化
+	pinMode(RAINDROP_PIN, INPUT); // 雨滴传感器GPIO初始化
 	pinMode(HUMIDIFIER_PIN, OUTPUT);
 	pinMode(ELECTRIC_BLANKET_PIN, OUTPUT);
 	pinMode(26, OUTPUT);
 }
 
 /**
- * @brief wifi连接 
+ * @brief wifi连接
  */
-void WifiSetup() {
+void WifiSetup()
+{
 	delay(10);
 	Serial.println("连接WIFI");
 	WiFi.begin(WIFI_SSID, WIFI_PASSWD);
-	while (!WiFi.isConnected()) {
-	Serial.print(".");
-		// vTaskDelay(pdMS_TO_TICKS(500));  // 500ms 
-		delay(500);  // 500ms 
+	while (!WiFi.isConnected())
+	{
+		Serial.print(".");
+		// vTaskDelay(pdMS_TO_TICKS(500));  // 500ms
+		delay(500); // 500ms
 	}
 	Serial.println("OK");
 	Serial.println("Wifi连接成功");
@@ -289,20 +326,23 @@ void WifiSetup() {
  * @param payload 接受的消息负载
  * @param length 消息长度
  */
-void mqttCallback(char *topic, byte *payload, unsigned int length) {
-	if (strstr(topic, ALINK_TOPIC_PROP_SET)) {
+void mqttCallback(char *topic, byte *payload, unsigned int length)
+{
+	if (strstr(topic, ALINK_TOPIC_PROP_SET))
+	{
 		Serial.println("收到下发的命令主题:");
 		Serial.println(topic);
 		Serial.println("下发的内容是:");
-		payload[length] = '\0'; //为payload添加一个结束附,防止Serial.println()读过了
+		payload[length] = '\0'; // 为payload添加一个结束附,防止Serial.println()读过了
 		Serial.println((char *)payload);
 
 		// 接下来是收到的json字符串的解析
 		DynamicJsonDocument doc(150);
 		DeserializationError error = deserializeJson(doc, payload);
-		if (error) {
+		if (error)
+		{
 			Serial.println("parse json failed");
-            Serial.println(error.c_str());
+			Serial.println(error.c_str());
 			return;
 		}
 		JsonObject setAlinkMsgObj = doc.as<JsonObject>();
@@ -310,20 +350,25 @@ void mqttCallback(char *topic, byte *payload, unsigned int length) {
 		Serial.println();
 
 		// 回调数据处理
-		aliData.warmMilk = setAlinkMsgObj["params"]["warmMilk"];  // {"name": "warmMilk", "type": "bool"}
-		Serial.println(aliData.warmMilk);
+		aliData.bottleHeat = setAlinkMsgObj["params"]["bottleHeat"]; // {"name": "bottleHeat", "type": "bool"}
+		Serial.println(aliData.bottleHeat);
 	}
 }
 
 /**
- * @brief mqtt客户端重连函数, 如果客户端断线,可以通过此函数重连		
+ * @brief mqtt客户端重连函数, 如果客户端断线,可以通过此函数重连
  */
-void clientReconnect() {
-	while (!mqttClient.connected()) { //再重连客户端
+void clientReconnect()
+{
+	while (!mqttClient.connected())
+	{ // 再重连客户端
 		Serial.println("reconnect MQTT...");
-		if (connectAliyunMQTT(mqttClient, PRODUCT_KEY, DEVICE_NAME, DEVICE_SECRET)) {
+		if (connectAliyunMQTT(mqttClient, PRODUCT_KEY, DEVICE_NAME, DEVICE_SECRET))
+		{
 			Serial.println("connected");
-		} else {
+		}
+		else
+		{
 			Serial.println("failed");
 			Serial.println(mqttClient.state());
 			Serial.println("try again in 5 sec");
@@ -333,13 +378,18 @@ void clientReconnect() {
 }
 
 /**
- * @brief  MQTT网络检测
+ * @brief MQTT网络检测
  */
-void mqttCheck() {
-	if (!WiFi.isConnected()) {          // 判断WiFi是否连接
+void mqttCheck()
+{
+	if (!WiFi.isConnected())
+	{ // 判断WiFi是否连接
 		WifiSetup();
-	} else { //如果WIFI连接了,
-		if (!mqttClient.connected()) {  // 再次判断mqtt是否连接成功
+	}
+	else
+	{ // 如果WIFI连接了,
+		if (!mqttClient.connected())
+		{ // 再次判断mqtt是否连接成功
 			Serial.println("mqtt disconnected!Try reconnect now...");
 			Serial.println(mqttClient.state());
 			clientReconnect();
@@ -353,8 +403,10 @@ void mqttCheck() {
  * @date 2022.6.9
  * @author lxy@qq.com
  */
-void readMLX() {
-	if (therm.read()) { // On success, read() will return 1, on fail 0.
+void readMLX()
+{
+	if (therm.read())
+	{ // On success, read() will return 1, on fail 0.
 		String s = String(therm.object(), 2);
 		data.bodyTemperature = atoi(s.c_str());
 	}
@@ -362,76 +414,91 @@ void readMLX() {
 
 /**
  * @brief SHTC3的CRC校验
- * @param DAT 
- * @param CRC_DAT 
- * @return uint8_t 
+ * @param DAT
+ * @param CRC_DAT
+ * @return uint8_t
  */
-uint8_t SHTC3_CRC_CHECK(uint16_t DAT,uint8_t CRC_DAT) {
-    uint8_t i,t,temp;
-    uint8_t CRC_BYTE;  
-    CRC_BYTE = 0xFF;  
-    temp = (DAT>>8) & 0xFF;        
-    for (t = 0;t < 2;t ++) {
-        CRC_BYTE ^= temp;
-        for(i = 0;i < 8;i ++) {
-            if (CRC_BYTE & 0x80) {
-                CRC_BYTE <<= 1;                
-                CRC_BYTE ^= 0x31;    
-            } else {
-                CRC_BYTE <<= 1;    
-            }
-        }        
-        if (t == 0) {
-            temp = DAT & 0xFF; 
-        }
-    }
-    if (CRC_BYTE == CRC_DAT) {
-        temp = 1;    
-    } else {
-        temp = 0;    
-    }   
-    return temp;
+uint8_t SHTC3_CRC_CHECK(uint16_t DAT, uint8_t CRC_DAT)
+{
+	uint8_t i, t, temp;
+	uint8_t CRC_BYTE;
+	CRC_BYTE = 0xFF;
+	temp = (DAT >> 8) & 0xFF;
+	for (t = 0; t < 2; t++)
+	{
+		CRC_BYTE ^= temp;
+		for (i = 0; i < 8; i++)
+		{
+			if (CRC_BYTE & 0x80)
+			{
+				CRC_BYTE <<= 1;
+				CRC_BYTE ^= 0x31;
+			}
+			else
+			{
+				CRC_BYTE <<= 1;
+			}
+		}
+		if (t == 0)
+		{
+			temp = DAT & 0xFF;
+		}
+	}
+	if (CRC_BYTE == CRC_DAT)
+	{
+		temp = 1;
+	}
+	else
+	{
+		temp = 0;
+	}
+	return temp;
 }
 
 /**
  * @brief 获取温湿度数据
  */
-void readSHTC3() {   
-	Wire.beginTransmission(SHTC3_ADDRESS); //根据地址0x70，开始向I2C的从机进行传输。
-	Wire.write(byte(0xE0));       //发送写入指令
-	Wire.endTransmission();       //停止向从机传输
+void readSHTC3()
+{
+	Wire.beginTransmission(SHTC3_ADDRESS); // 根据地址0x70，开始向I2C的从机进行传输。
+	Wire.write(byte(0xE0));				   // 发送写入指令
+	Wire.endTransmission();				   // 停止向从机传输
 	Wire.beginTransmission(SHTC3_ADDRESS);
-	Wire.write(byte(0x35));       //发送唤醒指令的高位部分
-	Wire.write(byte(0x17));       //发送唤醒指令的低位部分
+	Wire.write(byte(0x35)); // 发送唤醒指令的高位部分
+	Wire.write(byte(0x17)); // 发送唤醒指令的低位部分
 	Wire.endTransmission();
-	delayMicroseconds(300);       //延时300微秒
+	delayMicroseconds(300); // 延时300微秒
 	Wire.beginTransmission(SHTC3_ADDRESS);
 	Wire.write(byte(0xE0));
 	Wire.endTransmission();
 	Wire.beginTransmission(SHTC3_ADDRESS);
-	Wire.write(byte(0x7C));       //发送采集指令的高位部分
-	Wire.write(byte(0xA2));       //发送采集指令的低位部分
+	Wire.write(byte(0x7C)); // 发送采集指令的高位部分
+	Wire.write(byte(0xA2)); // 发送采集指令的低位部分
 	Wire.endTransmission();
 	Wire.beginTransmission(SHTC3_ADDRESS);
-	Wire.write(byte(0xE1));       //发送读取指令
+	Wire.write(byte(0xE1)); // 发送读取指令
 	Wire.endTransmission();
-	Wire.requestFrom(SHTC3_ADDRESS,6);     //向从机请求数据
-	uint16_t T_temp,RH_temp,T_CRC,RH_CRC;
-	if (2 <= Wire.available()) {
-		T_temp = Wire.read();     //接收温度高位数据
-		T_temp = T_temp << 8;     //左移8位
-		T_temp |= Wire.read();    //左移8位后的温度高位数据与接收到的温度低位数据进行按位或运算
-		T_CRC = Wire.read();      //接收CRC校验码
-		if(SHTC3_CRC_CHECK(T_temp,T_CRC)){  //校验数据
-			data.envTemperature = float(T_temp) * 175 / 65536 - 45;  //计算出温度
+	Wire.requestFrom(SHTC3_ADDRESS, 6); // 向从机请求数据
+	uint16_t T_temp, RH_temp, T_CRC, RH_CRC;
+	if (2 <= Wire.available())
+	{
+		T_temp = Wire.read();  // 接收温度高位数据
+		T_temp = T_temp << 8;  // 左移8位
+		T_temp |= Wire.read(); // 左移8位后的温度高位数据与接收到的温度低位数据进行按位或运算
+		T_CRC = Wire.read();   // 接收CRC校验码
+		if (SHTC3_CRC_CHECK(T_temp, T_CRC))
+		{															// 校验数据
+			data.envTemperature = float(T_temp) * 175 / 65536 - 45; // 计算出温度
 		}
 	}
-	if (2 <= Wire.available()) {
-		RH_temp = Wire.read();     //接收湿度高位数据
-		RH_temp = RH_temp << 8;     //左移8位
-		RH_temp |= Wire.read();    //左移8位后的湿度高位数据与接收到的湿度低位数据进行按位或运算
+	if (2 <= Wire.available())
+	{
+		RH_temp = Wire.read();	// 接收湿度高位数据
+		RH_temp = RH_temp << 8; // 左移8位
+		RH_temp |= Wire.read(); // 左移8位后的湿度高位数据与接收到的湿度低位数据进行按位或运算
 		RH_CRC = Wire.read();
-		if(SHTC3_CRC_CHECK(RH_temp,RH_CRC)){
+		if (SHTC3_CRC_CHECK(RH_temp, RH_CRC))
+		{
 			data.envHumidity = float(RH_temp) * 100 / 65536;
 		}
 	}
@@ -442,84 +509,102 @@ void readSHTC3() {
  * @author lxy
  * @return 重力传感器原始数据
  */
-unsigned long readHX711(void) {
-	unsigned long count = 0;        // 储存输出值  
-	unsigned char i;       
+unsigned long readHX711(void)
+{
+	unsigned long count = 0; // 储存输出值
+	unsigned char i;
 
-	digitalWrite(HX711_DT_PIN, HIGH);   
-	delayMicroseconds(1); 			//延时 1微秒  
-	digitalWrite(HX711_SCK_PIN, LOW);  
-	delayMicroseconds(1);   		//延时 1微秒  
+	digitalWrite(HX711_DT_PIN, HIGH);
+	delayMicroseconds(1); // 延时 1微秒
+	digitalWrite(HX711_SCK_PIN, LOW);
+	delayMicroseconds(1); // 延时 1微秒
 
 	// 当DT的值为1时，开始ad转换
-	while(digitalRead(HX711_DT_PIN));    
+	while (digitalRead(HX711_DT_PIN))
+		;
 	// 24个脉冲，对应读取24位数值
-	for(i = 0; i < 24; i++) {   
+	for (i = 0; i < 24; i++)
+	{
 		// 利用 SCK从0--1 ，发送一次脉冲，读取数值
 		digitalWrite(HX711_SCK_PIN, HIGH);
-		
-		delayMicroseconds(1);  			// 延时 1微秒  
-		count = count << 1;    			// 用于移位存储24位二进制数值
-		digitalWrite(HX711_SCK_PIN, LOW);   // 为下次脉冲做准备
+
+		delayMicroseconds(1);			  // 延时 1微秒
+		count = count << 1;				  // 用于移位存储24位二进制数值
+		digitalWrite(HX711_SCK_PIN, LOW); // 为下次脉冲做准备
 		delayMicroseconds(1);
-		if(digitalRead(HX711_DT_PIN))    	// 若DT值为1，对应count输出值也为1
-			count++; 
-	} 
-	digitalWrite(HX711_SCK_PIN, HIGH);    	// 再来一次上升沿 选择工作方式  128增益
-	
+		if (digitalRead(HX711_DT_PIN)) // 若DT值为1，对应count输出值也为1
+			count++;
+	}
+	digitalWrite(HX711_SCK_PIN, HIGH); // 再来一次上升沿 选择工作方式  128增益
+
 	// 按位异或,不同则为1 => 0^0=0; 1^0=1;
 	// 对应二进制 => [1000 0000 0000 0000 0000 0000]; 作用为将最高位取反,其他位保留原值
-	count ^= 0x800000;   	
+	count ^= 0x800000;
 	delayMicroseconds(1);
 
-	digitalWrite(HX711_SCK_PIN, LOW);  // SCK=0；     
+	digitalWrite(HX711_SCK_PIN, LOW); // SCK=0；
 	delayMicroseconds(1);
-	// 返回传感器读取值  
-	return count;     		
+	// 返回传感器读取值
+	return count;
 }
 
 /**
  * @brief 获取物体真实重量
  * @author lxy
  */
-void getWeight() {
+void getWeight()
+{
 	long HX711_Buffer;
-	HX711_Buffer = readHX711();  	 // 读取传感器输出值
-	data.weightTrue  = HX711_Buffer; // 将传感器的输出值储存
-	data.weightTrue -= weightInit;   // 获取实物的AD采样数值。
-	data.weightTrue  = (long)((float)data.weightTrue / GAP_VALUE);    //AD值转换为重量（g） 
-	//Serial.printf("data weight: %d", data.weightTrue);
+	HX711_Buffer = readHX711();									  // 读取传感器输出值
+	data.weightTrue = HX711_Buffer;								  // 将传感器的输出值储存
+	data.weightTrue -= weightInit;								  // 获取实物的AD采样数值。
+	data.weightTrue = (long)((float)data.weightTrue / GAP_VALUE); // AD值转换为重量（g）
+																  // Serial.printf("data weight: %d", data.weightTrue);
 }
 
 /**
  * @brief 读取雨滴传感器数据
  */
-void readRainDrop(void) {
+void readRainDrop(void)
+{
 	data.rainDrop = digitalRead(RAINDROP_PIN);
 }
 
 // 加湿器handler
-void humidifierHandler(void) {
-	if (data.envHumidity < HUMIDIFIER_THRESHOLD_VALUE) {
+void humidifierHandler(void)
+{
+	if (data.envHumidity < HUMIDIFIER_THRESHOLD_VALUE)
+	{
 		digitalWrite(HUMIDIFIER_PIN, HIGH);
-	}  else {
+	}
+	else
+	{
 		digitalWrite(HUMIDIFIER_PIN, LOW);
 	}
 }
 
-// 报警handler
-void buzzerHandler(void) {
-	if (xSemaphoreTake(xMutexBuzzer, timeout) == pdPASS) {				
-		if (data.weightTrue < WEIGHT_THRESHOLD_VALUE) {
+/**
+ * @brief 报警handler
+ */
+void buzzerHandler(void)
+{
+	if (xSemaphoreTake(xMutexBuzzer, timeout) == pdPASS)
+	{
+		if (data.weightTrue < WEIGHT_THRESHOLD_VALUE)
+		{
 			buzzerMode.mode = 1;
 			xSemaphoreGive(xMutexBuzzer);
 			return;
-		} else if (data.rainDrop) {
+		}
+		else if (data.rainDrop)
+		{
 			// buzzer music
 			buzzerMode.mode = 2;
 			xSemaphoreGive(xMutexBuzzer);
 			return;
-		} else {
+		}
+		else
+		{
 			buzzerMode.mode = 0;
 			xSemaphoreGive(xMutexBuzzer);
 			return;
@@ -527,23 +612,44 @@ void buzzerHandler(void) {
 	}
 }
 
-// 电热毯加热handler
-void electricBlanketHandler(void) {
-	if (data.envTemperature < ELECTRON_BLANKET_THRESHOLD_VALUE) {
+/**
+ * @brief 电热毯加热handler
+ */
+void electricBlanketHandler(void)
+{
+	if (data.envTemperature < ELECTRON_BLANKET_THRESHOLD_VALUE)
+	{
 		digitalWrite(ELECTRIC_BLANKET_PIN, HIGH);
-	} else {
+	}
+	else
+	{
 		digitalWrite(ELECTRIC_BLANKET_PIN, LOW);
 	}
 }
 
+/**
+ * @brief [奶瓶] 由微信小程序控制开启或给关闭奶瓶加热
+ */
+void bottleHeatingHandler(void)
+{
+	if (aliData.bottleHeat)
+	{
+		digitalWrite(BOTTLE_HEAT_PIN, HIGH);
+	}
+	else
+	{
+		digitalWrite(BOTTLE_HEAT_PIN, LOW);
+	}
+}
 
 // 初始化显示信息
-void initDisplayFun(const char* info) {
-	u8g2.clearBuffer();                                       
-	u8g2.setFont(u8g2_font_ncenB08_tr);      
-	u8g2.setColorIndex(2); 
+void initDisplayFun(const char *info)
+{
+	u8g2.clearBuffer();
+	u8g2.setFont(u8g2_font_ncenB08_tr);
+	u8g2.setColorIndex(2);
 	char buffer[32];
 	sprintf(buffer, "%s", info);
-	u8g2.drawStr(0, 10, buffer);       
-	u8g2.sendBuffer(); 
+	u8g2.drawStr(0, 10, buffer);
+	u8g2.sendBuffer();
 }
