@@ -35,7 +35,7 @@ void setupTask(void *ptParams)
 	Wire.begin(); // 初始化为I2C主机 SHTC3
 
 	weightInit = readHX711(); // 获取开机时的重力传感器数据
-	// TODO: 打印初始化的 重量值：weightInit
+	// 打印初始化的 重量值：weightInit
 	Serial.printf("weightInit Date: %ld\n", weightInit);
 	Serial.flush();
 
@@ -101,7 +101,7 @@ void sensorGetTask(void *ptParams)
 			readRainDrop();
 			readMLX();
 			// LOG
-			Serial.println("get sensor data.");
+			// Serial.println("get sensor data.");
 			// 释放锁
 			xSemaphoreGive(xMutexData);
 		}
@@ -258,16 +258,16 @@ void buzzerTask(void *ptParams)
 		switch (xMode)
 		{
 		case 0:
-			Serial.println("buzzer: none");
+			// Serial.println("buzzer: none");  // log
 			ledcWrite(channel, 0);
 			break;
 		case 1:
-			Serial.println("buzzer: alert");
+			// Serial.println("buzzer: alert"); // log
 			ledcWrite(channel, 255);
 			vTaskDelay(pdMS_TO_TICKS(1000));
 			break;
 		case 2:
-			Serial.println("buzzer: music");
+			// Serial.println("buzzer: music");  // log
 			for (int x = 0; x < length; x++)
 			{
 				if (xSemaphoreTake(xMutexBuzzer, timeout) == pdPASS)
@@ -299,7 +299,7 @@ void pinSetup()
 	pinMode(RAINDROP_PIN, INPUT); // 雨滴传感器GPIO初始化
 	pinMode(HUMIDIFIER_PIN, OUTPUT);
 	pinMode(ELECTRIC_BLANKET_PIN, OUTPUT);
-	pinMode(26, OUTPUT);
+	pinMode(BOTTLE_HEAT_PIN, OUTPUT);
 }
 
 /**

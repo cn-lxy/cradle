@@ -55,7 +55,7 @@
 #define DEVICE_SECRET "37242dd6595dd7e1e5e174d3ae9189e0"  //设备key
 #define REGION_ID "cn-shanghai"
 // 服务端消息订阅Topic
-#define ALINK_TOPIC_PROP_SET "/a1nKID4oRsp/" DEVICE_NAME "/user/get"
+#define ALINK_TOPIC_PROP_SET "/a1HqBPF6ttD/" DEVICE_NAME "/user/get"
 // 属性上报Topic
 #define ALINK_TOPIC_PROP_POST "/sys/" PRODUCT_KEY "/" DEVICE_NAME "/thing/event/property/post"
 // 设备 `POST` 上传数据要用到一个json字符串, 这个是拼接postJson用到的一个字符串
