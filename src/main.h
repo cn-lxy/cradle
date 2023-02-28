@@ -88,9 +88,11 @@ typedef struct {
 } BuzzerMode;
 BuzzerMode buzzerMode;
 
-// 奶瓶加热
+// Aliyun 数据
 typedef struct {
-	volatile bool bottleHeat = false;
+	volatile bool bottleHeatStatus = false;      // [微信小程序状态] 奶瓶加热
+	volatile bool alertStatus = false;			 // [微信小程序状态] 报警
+	volatile bool electricBlankStatus = false;   // [微信小程序状态] 电热毯
 } AliData;
 AliData aliData; 
 
