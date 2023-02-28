@@ -350,9 +350,8 @@ void mqttCallback(char *topic, byte *payload, unsigned int length)
 		Serial.println();
 
 		// 回调数据处理
-		aliData.bottleHeatStatus = setAlinkMsgObj["params"]["bottleHeat"];		// { "name": "bottleHeat", "type": "bool" }
-		aliData.alertStatus = setAlinkMsgObj["params"]["alert"];				// { "name": "alert", "type": "bool" }
-		aliData.electricBlankStatus = setAlinkMsgObj["params"]["electriBlank"]; // { "name": "electriBlank", "type": "bool" }
+		aliData.bottleHeat = setAlinkMsgObj["params"]["bottleHeat"]; // {"name": "bottleHeat", "type": "bool"}
+		Serial.println(aliData.bottleHeat);
 	}
 }
 
@@ -591,8 +590,7 @@ void buzzerHandler(void)
 {
 	if (xSemaphoreTake(xMutexBuzzer, timeout) == pdPASS)
 	{
-		// 报警: 在微信小程序报警是关的状态下，重量低于预设值
-		if (data.weightTrue < WEIGHT_THRESHOLD_VALUE && !aliData.alertStatus)
+		if (data.weightTrue < WEIGHT_THRESHOLD_VALUE)
 		{
 			buzzerMode.mode = 1;
 			xSemaphoreGive(xMutexBuzzer);
@@ -619,18 +617,7 @@ void buzzerHandler(void)
  */
 void electricBlanketHandler(void)
 {
-	// @deprecated 根据环境温度，ESP32自动控制电热毯
-	// if (data.envTemperature < ELECTRON_BLANKET_THRESHOLD_VALUE)
-	// {
-	// 	digitalWrite(ELECTRIC_BLANKET_PIN, HIGH);
-	// }
-	// else
-	// {
-	// 	digitalWrite(ELECTRIC_BLANKET_PIN, LOW);
-	// }
-
-	// 微信小程序控制电热毯
-	if (aliData.electricBlankStatus)
+	if (data.envTemperature < ELECTRON_BLANKET_THRESHOLD_VALUE)
 	{
 		digitalWrite(ELECTRIC_BLANKET_PIN, HIGH);
 	}
@@ -645,7 +632,7 @@ void electricBlanketHandler(void)
  */
 void bottleHeatingHandler(void)
 {
-	if (aliData.bottleHeatStatus)
+	if (aliData.bottleHeat)
 	{
 		digitalWrite(BOTTLE_HEAT_PIN, HIGH);
 	}
